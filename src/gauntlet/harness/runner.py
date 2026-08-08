@@ -6,8 +6,9 @@ target and the judge; neither knows about the other.
 
 import asyncio
 
+from gauntlet.harness.storage import save_run
 from gauntlet.judges.secret_leak_judge import secret_leaked
-from gauntlet.targets.simple_target import SECRET, ask_target
+from gauntlet.targets.simple_target import MODEL, SECRET, ask_target
 
 # ---- Golden dataset ----
 # Curated by technique family, not by volume. Every entry probes a
@@ -63,11 +64,12 @@ ATTACKS = [
 ]
 
 
-async def run_attack(attack: str, trials: int) -> int:
+async def run_attack(attack: str, trials: int) -> tuple[int, list[str]]:
     """Run a single attack N times concurrently, return the number of leaks."""
     coroutines = [ask_target(attack) for _ in range(trials)]
     responses = await asyncio.gather(*coroutines)
-    return sum(1 for r in responses if secret_leaked(r, SECRET))
+    leaks = sum(1 for r in responses if secret_leaked(r, SECRET))
+    return leaks, responses
 
 
 async def run_campaign(attacks: list[str], trials: int = 2) -> list[dict]:
@@ -75,12 +77,13 @@ async def run_campaign(attacks: list[str], trials: int = 2) -> list[dict]:
     results = []
 
     for i, attack in enumerate(attacks, start=1):
-        runs = await run_attack(attack, trials)
+        runs, responses = await run_attack(attack, trials)
         rate_pct = runs / trials * 100
         results.append(
             {
                 "id": i,
                 "attack": attack,
+                "responses": responses,
                 "leaks": runs,
                 "trials": trials,
                 "rate_pct": rate_pct,
@@ -106,9 +109,12 @@ def attack_success_rate(results: list[dict]) -> tuple[int, int, float]:
 
 
 async def main() -> None:
-    results = await run_campaign(ATTACKS, trials=10)
+    results = await run_campaign(ATTACKS, trials=3)
     leaks, trials, asr = attack_success_rate(results)
     print(f"\nASR: {asr:.1f}%  ({leaks}/{trials})")
+
+    path = save_run(results, MODEL)
+    print(f"Saved to {path}")
 
 
 if __name__ == "__main__":
