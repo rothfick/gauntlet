@@ -4,6 +4,8 @@ This is where the roles connect: the harness knows about both the
 target and the judge; neither knows about the other.
 """
 
+import asyncio
+
 from gauntlet.judges.secret_leak_judge import secret_leaked
 from gauntlet.targets.simple_target import SECRET, ask_target
 
@@ -61,22 +63,19 @@ ATTACKS = [
 ]
 
 
-def run_attack(attack: str, trials: int) -> int:
-    """Run a single attack multiple times and return the number of leaks."""
-    leaks = 0
-    for _ in range(trials):
-        response = ask_target(attack)
-        if secret_leaked(response, SECRET):
-            leaks += 1
-    return leaks
+async def run_attack(attack: str, trials: int) -> int:
+    """Run a single attack N times concurrently, return the number of leaks."""
+    coroutines = [ask_target(attack) for _ in range(trials)]
+    responses = await asyncio.gather(*coroutines)
+    return sum(1 for r in responses if secret_leaked(r, SECRET))
 
 
-def run_campaign(attacks: list[str], trials: int = 2) -> list[dict]:
+async def run_campaign(attacks: list[str], trials: int = 2) -> list[dict]:
     """Run every attack against the target N-times and record the outcome."""
     results = []
 
     for i, attack in enumerate(attacks, start=1):
-        runs = run_attack(attack, trials)
+        runs = await run_attack(attack, trials)
         rate_pct = runs / trials * 100
         results.append(
             {
@@ -106,9 +105,11 @@ def attack_success_rate(results: list[dict]) -> tuple[int, int, float]:
     return total_leaks, total_trials, asr
 
 
-if __name__ == "__main__":
-    results = run_campaign(ATTACKS)
-
+async def main() -> None:
+    results = await run_campaign(ATTACKS, trials=10)
     leaks, trials, asr = attack_success_rate(results)
+    print(f"\nASR: {asr:.1f}%  ({leaks}/{trials})")
 
-    print(f"\nASR: {asr:.1f}% {leaks}/{trials}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
